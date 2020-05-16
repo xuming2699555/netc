@@ -10,7 +10,6 @@ struct netconf
     char *inet;
     char *netmask;
 };
-
 struct rule
 {
     char Rule[1024];
@@ -28,6 +27,167 @@ struct table
     char *tablename;
     struct chain *chainlist;
 };
+
+char **split(const char *source, char flag)
+{
+    char **pt;
+    int j, n = 0;
+    int count = 1;
+    int len = strlen(source);
+    char tmp[len + 1];
+    tmp[0] = '\0';
+
+    for (int i = 0; i < len; ++i)
+    {
+        if (source[i] == flag && source[i + 1] == '\0')
+            continue;
+        else if (source[i] == flag && source[i + 1] != flag)
+            count++;
+    }
+    // 多分配一个char*，是为了设置结束标志
+    pt = (char **)malloc((count + 1) * sizeof(char *));
+
+    count = 0;
+    for (int i = 0; i < len; ++i)
+    {
+        if (i == len - 1 && source[i] != flag)
+        {
+            tmp[n++] = source[i];
+            tmp[n] = '\0'; // 字符串末尾添加空字符
+            j = strlen(tmp) + 1;
+            pt[count] = (char *)malloc(j * sizeof(char));
+            strcpy(pt[count++], tmp);
+        }
+        else if (source[i] == flag)
+        {
+            j = strlen(tmp);
+            if (j != 0)
+            {
+                tmp[n] = '\0'; // 字符串末尾添加空字符
+                pt[count] = (char *)malloc((j + 1) * sizeof(char));
+                strcpy(pt[count++], tmp);
+                // 重置tmp
+                n = 0;
+                tmp[0] = '\0';
+            }
+        }
+        else
+            tmp[n++] = source[i];
+    }
+    // 设置结束标志
+    pt[count] = NULL;
+
+    return pt;
+}
+
+int getTableData2(char *inputPath, char *outputPath, char *tableName)
+{
+    //TODO:参数合法性检查
+
+    //创建表结构
+    struct table newtable;
+    newtable.tablename = (char *)malloc(32 * sizeof(char));
+    strcpy(newtable.tablename, tableName);
+    newtable.chainlist = NULL;
+    struct chain *curchain = NULL;
+    struct rule *currule = NULL;
+
+    //处理输入文件
+    FILE *infp = fopen(inputPath, "r");
+    char linebuf[1024];
+    if (infp == NULL)
+    {
+        printf("无法打开规则文件: %s\n", inputPath);
+        return 1;
+    }
+    while (!feof(infp))
+    {
+        fgets(linebuf, 1024, infp);
+        //链名行
+        if (linebuf[0] == 'C' || linebuf[0] == 'c')
+        {
+            currule = NULL;
+            //创建新链
+            struct chain *chain = (struct chain *)malloc(sizeof(struct chain));
+            //处理字符串，获取链名和默认策略
+            char **p1;
+            p1 = split(linebuf, ' ');
+            for (int i = 0; p1[i] != NULL; i++)
+            {
+                if ((strcmp(p1[i], "Chain") == 0) || (strcmp(p1[i], "chain") == 0))
+                {
+                    strcpy(chain->chainname, p1[++i]);
+                }
+                else if (strcmp(p1[i] + 1, "policy") == 0)
+                {
+                    if (strchr(p1[++i], 'A') != NULL)
+                    {
+                        chain->polocy = 1;
+                    }
+                    else
+                    {
+                        chain->polocy = 0;
+                    }
+                }
+            }
+            if (newtable.chainlist == NULL)
+            {
+                newtable.chainlist = chain;
+                curchain = chain;
+            }
+            else
+            {
+                curchain->next = chain;
+                curchain = curchain->next;
+            }
+        }
+        else if (linebuf[0] == 'A' || linebuf[0] == 'D')
+        {
+            struct rule *newrule = (struct rule *)malloc(sizeof(struct rule));
+            newrule->next = NULL;
+            strcpy(newrule->Rule, linebuf);
+            if (currule == NULL)
+            {
+                curchain->rule = newrule;
+                currule = newrule;
+            }
+            else
+            {
+                currule->next = newrule;
+                currule = currule->next;
+            }
+        }
+    }
+    fclose(infp);
+
+    //生成结果数据
+    FILE *outfp;
+    curchain = newtable.chainlist;
+    while (curchain != NULL)
+    {
+        char filepath[256];
+        strcpy(filepath, outputPath);
+        strcat(filepath, tableName);
+        strcat(filepath, curchain->chainname);
+
+        outfp = fopen(filepath, "w");
+        if (outfp == NULL)
+        {
+            printf("创建结果文件失败： %s", filepath);
+            continue;
+        }
+        fputs((curchain->polocy) ? "Accept\n" : "Deny\n", outfp);
+        currule = curchain->rule;
+        while (currule != NULL)
+        {
+            fputs(currule->Rule, outfp);
+            currule = currule->next;
+        }
+        curchain = curchain->next;
+    }
+
+    return 0;
+}
 
 cJSON *struct_to_json(struct netconf *struct_obj)
 {
@@ -254,27 +414,27 @@ int main(int argc, char const *argv[])
     //读取方式：按行读取
     //初始chain为空，依次查找INPUT、FORWARD、OUTPUT三个链
 
-    if (getTableData("filter.txt", "./result/", "filter") != 0)
+    if (getTableData2("filter.txt", "./result/", "filter") != 0)
     {
         //出错
     }
     sprintf(report_msg, "complete polocies checking table filter");
     FWC_progress_report(sock, 6, 40, report_msg);
     system("sudo iptables -t nat -nL > nat.txt");
-    if (getTableData("nat.txt", "./result/", "nat") != 0)
+    if (getTableData2("nat.txt", "./result/", "nat") != 0)
     {
         //return 0;
     }
     sprintf(report_msg, "complete polocies checking table nat");
     FWC_progress_report(sock, 6, 60, report_msg);
     system("sudo iptables -t raw -nL > raw.txt");
-    if (getTableData("raw.txt", "./result/", "raw") != 0)
+    if (getTableData2("raw.txt", "./result/", "raw") != 0)
     {
     }
     sprintf(report_msg, "complete polocies checking table raw");
     FWC_progress_report(sock, 6, 80, report_msg);
     system("sudo iptables -t mangle -nL > mangle.txt");
-    if (getTableData("mangle.txt", "./result/", "mangle") != 0)
+    if (getTableData2("mangle.txt", "./result/", "mangle") != 0)
     {
     }
     sprintf(report_msg, "complete polocies checking table mangle");
