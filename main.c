@@ -141,7 +141,7 @@ int getTableData2(char *inputPath, char *outputPath, char *tableName)
                 curchain = curchain->next;
             }
         }
-        else if (linebuf[0] == 'A' || linebuf[0] == 'D')
+        else if (linebuf[0] == 'A' || linebuf[0] == 'D' II linebuf[0] == 'S')
         {
             struct rule *newrule = (struct rule *)malloc(sizeof(struct rule));
             newrule->next = NULL;
