@@ -163,8 +163,10 @@ int getTableData2(char *inputPath, char *outputPath, char *tableName)
     //生成结果数据
     FILE *outfp;
     curchain = newtable.chainlist;
+
     while (curchain != NULL)
     {
+        int linenum = 1;
         char filepath[256];
         strcpy(filepath, outputPath);
         strcat(filepath, tableName);
@@ -176,11 +178,14 @@ int getTableData2(char *inputPath, char *outputPath, char *tableName)
             printf("创建结果文件失败： %s", filepath);
             continue;
         }
-        fputs((curchain->polocy) ? "Accept\n" : "Deny\n", outfp);
+        fputs((curchain->polocy) ? "0Accept\n" : "0Deny\n", outfp);
         currule = curchain->rule;
         while (currule != NULL)
         {
-            fputs(currule->Rule, outfp);
+            char *name = (char *)malloc(sizeof(char) * 300);
+            sprintf(name, "%d%s", linenum, currule->Rule);
+            linenum++;
+            fputs(name, outfp);
             currule = currule->next;
         }
         curchain = curchain->next;
